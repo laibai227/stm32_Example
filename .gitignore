@@ -1,0 +1,34 @@
+# Build outputs
+Objects/
+Listings/
+MDK-ARM/Objects/
+MDK-ARM/Listings/
+
+# Compiled outputs
+*.o
+*.d
+*.lst
+*.map
+*.hex
+*.bin
+*.axf
+*.crf
+*.dep
+*.pack
+
+# IDE files
+*.uvoptx
+*.uvguix
+
+# CubeMX generated files - ignore all of Core and Drivers
+Core/
+Drivers/
+startup_stm32f103xb.s
+*.ioc
+.mxproject
+Middlewares/
+
+# But track these specific directories
+!Core/
+!HardWare/
+!MDK-ARM/
