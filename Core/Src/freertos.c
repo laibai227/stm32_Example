@@ -1,20 +1,20 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * File Name          : freertos.c
-  * Description        : Code for freertos applications
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2026 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * File Name          : freertos.c
+ * Description        : Code for freertos applications
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2026 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 
 /* Includes ------------------------------------------------------------------*/
@@ -29,7 +29,6 @@
 #include <stdio.h>
 #include "My_key.h"
 #include "string.h"
-#include "W25Q16.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -48,42 +47,68 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
-QueueHandle_t xKeyQueue = NULL;
 
-/* 队列静态内存 */
-static StaticQueue_t xKeyQueueTCB;
-static uint8_t xKeyQueueStorage[5 * sizeof(KeyType)];
+// 任务1 参数
+#define TASK1_STACK_SIZE 128
+#define TASK1_PRIORITY 5
+StackType_t Task1Stack[TASK1_STACK_SIZE];
+StaticTask_t Task1TCB;
+TaskHandle_t Task1Handle;
 
-/* KeyTask 静态内存 */
-static StaticTask_t xKeyTaskTCB;
-static StackType_t xKeyTaskStack[128];
-TaskHandle_t xKeyTaskHandle = NULL;
+// 任务2 参数
+#define TASK2_STACK_SIZE 128
+#define TASK2_PRIORITY 5
+StackType_t Task2Stack[TASK2_STACK_SIZE];
+StaticTask_t Task2TCB;
+TaskHandle_t Task2Handle;
 
-/* ControlTask 静态内存 */
-static StaticTask_t xControlTaskTCB;
-static StackType_t xControlTaskStack[192];
-TaskHandle_t xControlTaskHandle = NULL;
+// 任务3 参数
+#define TASK3_STACK_SIZE 128
+#define TASK3_PRIORITY 5
+StackType_t Task3Stack[TASK3_STACK_SIZE];
+StaticTask_t Task3TCB;
+TaskHandle_t Task3Handle;
+
+// 队列
+#define QUEUE1_LENGTH 5
+#define QUEUE1_ITEM_SIZE sizeof(int)
+uint8_t Queue1StorageBuffer[QUEUE1_LENGTH * QUEUE1_ITEM_SIZE];
+QueueHandle_t Queue1Handle;
+StaticQueue_t Queue1Buffer;
+
+#define BIG_QUEUE_LENGTH 5
+#define BIG_QUEUE_ITEM_SIZE sizeof(uint32_t *)
+uint8_t BigQueueStorageBuffer[BIG_QUEUE_LENGTH * BIG_QUEUE_ITEM_SIZE];
+QueueHandle_t BigQueueHandle;
+StaticQueue_t BigQueueBuffer;
+
+// 1. 定义大数据结构体（比如 1KB）
+typedef struct
+{
+  uint32_t id;
+  uint8_t payload[1024]; // 1KB 数据
+} LargeData_t;
+
 /* USER CODE END Variables */
-osThreadId defaultTaskHandle;
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
-void xKeyTask(void *argument);
-void xControlTask(void *argument);
-/* USER CODE END FunctionPrototypes */
+void task1(void *argument);
+void task2(void *argument);
+void task3(void *argument);
 
-void StartDefaultTask(void const * argument);
+/* USER CODE END FunctionPrototypes */
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
 /* GetIdleTaskMemory prototype (linked to static allocation support) */
-void vApplicationGetIdleTaskMemory( StaticTask_t **ppxIdleTaskTCBBuffer, StackType_t **ppxIdleTaskStackBuffer, uint32_t *pulIdleTaskStackSize );
+void vApplicationGetIdleTaskMemory(StaticTask_t **ppxIdleTaskTCBBuffer, StackType_t **ppxIdleTaskStackBuffer, uint32_t *pulIdleTaskStackSize);
 
 /* USER CODE BEGIN GET_IDLE_TASK_MEMORY */
 static StaticTask_t xIdleTaskTCBBuffer;
 static StackType_t xIdleStack[configMINIMAL_STACK_SIZE];
 
-void vApplicationGetIdleTaskMemory( StaticTask_t **ppxIdleTaskTCBBuffer, StackType_t **ppxIdleTaskStackBuffer, uint32_t *pulIdleTaskStackSize )
+void vApplicationGetIdleTaskMemory(StaticTask_t **ppxIdleTaskTCBBuffer, StackType_t **ppxIdleTaskStackBuffer, uint32_t *pulIdleTaskStackSize)
 {
   *ppxIdleTaskTCBBuffer = &xIdleTaskTCBBuffer;
   *ppxIdleTaskStackBuffer = &xIdleStack[0];
@@ -93,15 +118,16 @@ void vApplicationGetIdleTaskMemory( StaticTask_t **ppxIdleTaskTCBBuffer, StackTy
 /* USER CODE END GET_IDLE_TASK_MEMORY */
 
 /**
-  * @brief  FreeRTOS initialization
-  * @param  None
-  * @retval None
-  */
-void MX_FREERTOS_Init(void) {
+ * @brief  FreeRTOS initialization
+ * @param  None
+ * @retval None
+ */
+void MX_FREERTOS_Init(void)
+{
   /* USER CODE BEGIN Init */
-  //初始化OLED显示屏
+  // 初始化OLED显示屏
   OLED_Init();
-  
+
   /* USER CODE END Init */
 
   /* USER CODE BEGIN RTOS_MUTEX */
@@ -118,266 +144,107 @@ void MX_FREERTOS_Init(void) {
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
-  xKeyQueue = xQueueCreateStatic(
-  5,
-  sizeof(KeyType),
-  xKeyQueueStorage,
-  &xKeyQueueTCB
-);
+  Queue1Handle = xQueueCreateStatic(QUEUE1_LENGTH, QUEUE1_ITEM_SIZE, Queue1StorageBuffer, &Queue1Buffer);
+  BigQueueHandle = xQueueCreateStatic(BIG_QUEUE_LENGTH, BIG_QUEUE_ITEM_SIZE, BigQueueStorageBuffer, &BigQueueBuffer);
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
   /* definition and creation of defaultTask */
-  osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 256);
-  defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
-  xKeyTaskHandle = xTaskCreateStatic(
-    xKeyTask,
-    "KeyTask",
-    128,
-    NULL,
-    tskIDLE_PRIORITY + 2,
-    xKeyTaskStack,
-    &xKeyTaskTCB
-  );
-
-  xControlTaskHandle = xTaskCreateStatic(
-    xControlTask,
-    "CtrlTask",
-    192,
-    NULL,
-    tskIDLE_PRIORITY + 1,
-    xControlTaskStack,
-    &xControlTaskTCB
-  );
+  xTaskCreateStatic(task1,
+                    "task1",
+                    TASK1_STACK_SIZE,
+                    NULL,
+                    TASK1_PRIORITY,
+                    Task1Stack,
+                    &Task1TCB);
+  xTaskCreateStatic(task2,
+                    "task2",
+                    TASK2_STACK_SIZE,
+                    NULL,
+                    TASK2_PRIORITY,
+                    Task2Stack,
+                    &Task2TCB);
+  xTaskCreateStatic(task3,
+                    "task3",
+                    TASK3_STACK_SIZE,
+                    NULL,
+                    TASK3_PRIORITY,
+                    Task3Stack,
+                    &Task3TCB);
   /* USER CODE END RTOS_THREADS */
-
 }
 
-/* USER CODE BEGIN Header_StartDefaultTask */
-/**
-  * @brief  Function implementing the defaultTask thread.
-  * @param  argument: Not used
-  * @retval None
-  */
-/* USER CODE END Header_StartDefaultTask */
-void StartDefaultTask(void const * argument)
+void task1(void *argument)
 {
-  /* USER CODE BEGIN StartDefaultTask */
-  for(;;)
+  KeyType key1, key2;
+  uint32_t count = 0;
+
+  while (1)
   {
-    osDelay(1);
-  }
-  /* USER CODE END StartDefaultTask */
-}
+    key1 = Key_Scan(GPIOB, KEY1_PIN);
+    key2 = Key_Scan(GPIOB, KEY2_PIN);
 
-/* Private application code --------------------------------------------------*/
-/* USER CODE BEGIN Application */
-
-
-void xKeyTask(void *argument)
-{
-  KeyType key;
-
-  for(;;)
-  {
-    key = Key_Scan(GPIOB, KEY2_PIN);
-
-    if(key != KEY_NONE)
+    if (key1 != KEY_NONE)
     {
-        xQueueSend(xKeyQueue, &key, 0);
+      xQueueSend(Queue1Handle, &key1, 10);
     }
 
+    if (key2 == KEY_PRESS)
+    {
+      // 每次发送时重新申请内存并填充
+      LargeData_t *pData = (LargeData_t *)pvPortMalloc(sizeof(LargeData_t));
+      if (pData != NULL)
+      {
+        pData->id = count++;
+        for (int i = 0; i < sizeof(pData->payload); i++)
+        {
+          pData->payload[i] = (uint8_t)(count & 0xFF);
+        }
+        // 发送指针的地址
+        if (xQueueSend(BigQueueHandle, &pData, 10) != pdPASS)
+        {
+          // 处理发送失败的情况
+          vPortFree(pData);
+        }
+      }
+    }
     vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
 
-void xControlTask(void *argument)
+void task2(void *argument)
 {
-  KeyType key;
-
-  uint8_t led_mode = 0;
-  uint32_t last_tick = 0;
-  uint32_t blink_period = 0;
-
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_SET);
-
-  OLED_Show_String(0, 0, "READY   ", 8);
-  OLED_Show_String(0, 16, "MODE:OFF", 8);
-  OLED_Refresh_Gram();
-
-  for(;;)
+  KeyType key1;
+  while (1)
   {
-    if(xQueueReceive(xKeyQueue, &key, pdMS_TO_TICKS(10)) == pdTRUE)
-    {
-      if(key == KEY_PRESS)
-      {
-        if(led_mode == 0)
-        {
-          led_mode = 1;
-          HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_RESET); // LED ON
-          OLED_Show_String(0, 16, "MODE:ON ", 8);
-          OLED_Refresh_Gram();
-        }
-        else
-        {
-          led_mode = 0;
-          HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_SET);    // LED灭
-
-          OLED_Show_String(0, 16, "MODE:OFF", 8);
-          OLED_Refresh_Gram();
-        }
-      }
-      else if(key == KEY_SHORT)
-      {
-        led_mode = 2;
-        blink_period = 2000;
-        last_tick = HAL_GetTick();
-
-        OLED_Show_String(0, 16, "MODE:2S ", 8);
-        OLED_Refresh_Gram();
-      }
-      else if(key == KEY_DOUBLE)
-      {
-        led_mode = 3;
-        blink_period = 1000;
-        last_tick = HAL_GetTick();
-
-        OLED_Show_String(0, 16, "MODE:1S ", 8);
-        OLED_Refresh_Gram();
-      }
-      else if(key == KEY_LONG)
-      {
-        led_mode = 4;
-        blink_period = 300;
-        last_tick = HAL_GetTick();
-
-        OLED_Show_String(0, 16, "MODE:FST", 8);
-        OLED_Refresh_Gram();
-      }
-    }
-
-    if(led_mode == 0)
-    {
-      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_SET);    // LED灭
-    }
-    else if(led_mode == 1)
-    {
-      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_RESET);  // LED亮
-    }
-    else if(led_mode == 2 || led_mode == 3 || led_mode == 4)
-    {
-      if((HAL_GetTick() - last_tick) >= blink_period)
-      {
-          last_tick = HAL_GetTick();
-          HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_1);
-      }
-    }
+    xQueueReceive(Queue1Handle, &key1, 10);
+    // 显示按键类型
+    OLED_Show_String(0, 0, "KEY:", 8);
+    OLED_ShowNum(40, 0, key1, 1, 8);
+    OLED_Refresh_Gram();
   }
 }
 
-
-
-// 队列任务排队执行示例
-// void xControlTask(void *argument)
-// {
-//     KeyType key;
-//     UBaseType_t queue_count;
-
-//     uint8_t led_mode = 0;
-//     uint32_t last_tick = 0;
-//     uint32_t blink_period = 0;
-
-//     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_SET);
-
-//     OLED_Show_String(0, 0, "READY   ", 8);
-//     OLED_Show_String(0, 16, "MODE:OFF", 8);
-//     OLED_Refresh_Gram();
-
-//     for(;;)
-//     {
-//         /*
-//          * 等待按键事件
-//          */
-//         if(xQueueReceive(xKeyQueue, &key, portMAX_DELAY) == pdTRUE)
-//         {
-//             /*
-//              * 显示当前队列里还剩几个事件
-//              */
-//             queue_count = uxQueueMessagesWaiting(xKeyQueue);
-
-//             if(key == KEY_PRESS)
-//             {
-//                 if(led_mode == 0)
-//                 {
-//                     led_mode = 1;
-//                     OLED_Show_String(0, 16, "MODE:ON ", 8);
-//                 }
-//                 else
-//                 {
-//                     led_mode = 0;
-//                     OLED_Show_String(0, 16, "MODE:OFF", 8);
-//                 }
-//             }
-//             else if(key == KEY_SHORT)
-//             {
-//                 led_mode = 2;
-//                 blink_period = 2000;
-//                 last_tick = HAL_GetTick();
-
-//                 OLED_Show_String(0, 16, "MODE:2S ", 8);
-//             }
-//             else if(key == KEY_DOUBLE)
-//             {
-//                 led_mode = 3;
-//                 blink_period = 1000;
-//                 last_tick = HAL_GetTick();
-
-//                 OLED_Show_String(0, 16, "MODE:1S ", 8);
-//             }
-//             else if(key == KEY_LONG)
-//             {
-//                 led_mode = 4;
-//                 blink_period = 300;
-//                 last_tick = HAL_GetTick();
-
-//                 OLED_Show_String(0, 16, "MODE:FST", 8);
-//             }
-
-//             OLED_Show_String(0, 32, "DOING   ", 8);
-//             OLED_Printf(0, 48, 8, "QUEUE:%d", queue_count);
-//             OLED_Refresh_Gram();
-
-//             /*
-//              * 故意模拟一个耗时任务
-//              * 这 3 秒内你继续按键，KeyTask 还会继续扫描并发送队列
-//              */
-//             vTaskDelay(pdMS_TO_TICKS(3000));
-
-//             OLED_Show_String(0, 32, "DONE    ", 8);
-//             OLED_Refresh_Gram();
-//         }
-
-//         /*
-//          * 根据 led_mode 控制 LED
-//          */
-//         if(led_mode == 0)
-//         {
-//             HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_SET);
-//         }
-//         else if(led_mode == 1)
-//         {
-//             HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_RESET);
-//         }
-//         else if(led_mode == 2 || led_mode == 3 || led_mode == 4)
-//         {
-//             if((HAL_GetTick() - last_tick) >= blink_period)
-//             {
-//                 last_tick = HAL_GetTick();
-//                 HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_1);
-//             }
-//         }
-//     }
-// }
+void task3(void *argument)
+{
+  uint16_t i = 0;
+  LargeData_t *ReceivedData;
+  while (1)
+  {
+    if (xQueueReceive(BigQueueHandle, &ReceivedData, 10) == pdPASS)
+    {
+      // 处理接收到的数据
+      // ...
+      OLED_Printf(0, 20, 8, "ID:%d", ReceivedData->id);
+      OLED_Printf(0, 30, 8, "Val:%d", ReceivedData->payload[i]); // 显示 payload 的第一个字节
+      i++;
+      OLED_Refresh_Gram();
+      // 处理完毕后释放内存
+      vPortFree(ReceivedData);
+      ReceivedData = NULL;
+    }
+  }
+}
